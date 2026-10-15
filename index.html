@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffusion Lab — Prompt · Seed · Sampler · VAE</title>
+<meta name="description" content="แผนภาพอินเตอร์แอคทีฟอธิบายการทำงานของโมเดลเจนภาพ diffusion: prompt, seed, sampler และ VAE">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c0b0a;--panel:#151311;--panel2:#1c1916;--line:#2b2723;--line2:#3a342e;
+  --ink:#f2ece4;--ink2:#b9afa3;--ink3:#7d7468;
+  --gold:#e8b46a;--gold2:#f3d3a0;--rose:#e27a6a;--teal:#6fc3b2;--violet:#9d8cf0;
+  --r:16px;--mono:'JetBrains Mono',ui-monospace,monospace;--serif:'Instrument Serif',Georgia,serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans Thai',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{line-height:1.65;font-size:16px}
+a{color:var(--gold)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 18px}
+header{padding:56px 0 28px;position:relative;overflow:hidden}
+header:before{content:"";position:absolute;inset:-40% -10% auto auto;width:520px;height:520px;background:radial-gradient(circle,rgba(232,180,106,.18),transparent 65%);pointer-events:none}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+h1{font-family:var(--serif);font-weight:400;font-size:clamp(40px,8vw,76px);line-height:1;margin:12px 0 14px;letter-spacing:-.01em}
+h1 em{color:var(--gold2)}
+.lede{color:var(--ink2);max-width:620px;font-size:17px;margin:0}
+h2{font-family:var(--serif);font-weight:400;font-size:clamp(28px,5vw,40px);margin:0 0 6px;line-height:1.1}
+.sub{color:var(--ink3);margin:0 0 22px;font-size:15px}
+section{padding:34px 0}
+
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;position:relative}
+.node{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 12px;cursor:pointer;transition:border-color .2s,transform .2s,background .2s;position:relative}
+.node:hover{border-color:var(--line2);transform:translateY(-2px)}
+.node.on{border-color:var(--gold);background:linear-gradient(180deg,rgba(232,180,106,.10),var(--panel))}
+.node .n{font-family:var(--mono);font-size:11px;color:var(--ink3)}
+.node .t{font-weight:500;font-size:15px;margin-top:4px}
+.node .d{font-size:12px;color:var(--ink3);margin-top:2px;line-height:1.4}
+.node.on .n{color:var(--gold)}
+.node:not(:last-child):after{content:"";position:absolute;right:-9px;top:50%;width:10px;height:1px;background:var(--line2)}
+.explain{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:0 var(--r) var(--r) 0;padding:16px 18px;color:var(--ink2);font-size:15px;min-height:96px}
+.explain b{color:var(--ink);font-weight:500}
+
+/* lab */
+.lab{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px;align-items:start}
+.stage{background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:16px}
+.canvasbox{position:relative;border-radius:14px;overflow:hidden;aspect-ratio:1/1;background:#000}
+.canvasbox canvas{width:100%;height:100%;display:block;image-rendering:auto}
+.canvasbox.pix canvas{image-rendering:pixelated}
+.hud{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:11px;color:#fff}
+.hud span{background:rgba(0,0,0,.55);backdrop-filter:blur(6px);padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12)}
+.bar{height:3px;background:var(--line);border-radius:2px;margin:12px 0 4px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--rose),var(--gold));width:100%;transition:width .12s}
+.film{display:flex;gap:6px;overflow-x:auto;padding:10px 2px 4px;scrollbar-width:thin}
+.film canvas{width:58px;height:58px;border-radius:8px;border:1px solid var(--line);flex:0 0 auto;cursor:pointer;opacity:.75;transition:opacity .2s,border-color .2s}
+.film canvas.on{opacity:1;border-color:var(--gold)}
+.filmlbl{font-family:var(--mono);font-size:11px;color:var(--ink3);display:flex;justify-content:space-between}
+
+.ctrl{background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:18px}
+.grp{padding:12px 0;border-bottom:1px solid var(--line)}
+.grp:last-child{border-bottom:0}
+.lbl{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.lbl b{font-weight:500;font-size:14px}
+.lbl small{font-family:var(--mono);font-size:12px;color:var(--gold)}
+.hint{font-size:12px;color:var(--ink3);margin-top:6px;line-height:1.5}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px}
+.seg button,.btn{font:inherit;font-size:13px;color:var(--ink2);background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 6px;cursor:pointer;transition:all .15s}
+.seg button:hover,.btn:hover{border-color:var(--line2);color:var(--ink)}
+.seg button.on{background:rgba(232,180,106,.14);border-color:var(--gold);color:var(--gold2)}
+.btn.primary{background:var(--gold);color:#1a1208;border-color:var(--gold);font-weight:500}
+.btn.primary:hover{background:var(--gold2);color:#1a1208}
+.inline{display:flex;gap:8px;align-items:center}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;background:var(--line2);border-radius:2px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--gold);border:3px solid var(--bg);box-shadow:0 0 0 1px var(--gold);cursor:pointer}
+input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--gold);border:3px solid var(--bg);cursor:pointer}
+
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px}
+.card .k{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+.card h3{font-family:var(--serif);font-weight:400;font-size:26px;margin:6px 0 8px}
+.card p{margin:0;color:var(--ink2);font-size:15px}
+.card ul{margin:10px 0 0;padding-left:18px;color:var(--ink2);font-size:14px}
+.card li{margin:3px 0}
+.k1{color:var(--rose)}.k2{color:var(--teal)}.k3{color:var(--gold)}.k4{color:var(--violet)}
+code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);padding:1px 6px;border-radius:6px;color:var(--gold2)}
+footer{padding:40px 0 60px;color:var(--ink3);font-size:13px;border-top:1px solid var(--line);margin-top:20px}
+
+@media (max-width:860px){
+  .lab{grid-template-columns:1fr}
+  .pipe{grid-template-columns:repeat(3,1fr)}
+  .node:nth-child(3):after{display:none}
+  .cards{grid-template-columns:1fr}
+}
+@media (max-width:420px){
+  .pipe{grid-template-columns:repeat(2,1fr)}
+  .node:after{display:none}
+  header{padding-top:40px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="eyebrow">Diffusion Lab · Krea2 / Turbo models</div>
+    <h1>จาก <em>noise</em><br>สู่ภาพถ่าย</h1>
+    <p class="lede">โมเดลเจนภาพโอเพ่นซอร์สไม่ได้ "วาด" ภาพ แต่ค่อย ๆ <em style="color:var(--gold2);font-style:normal">ขัด noise ออก</em> ทีละขั้นจนเหลือภาพ ลองเล่นกับ 4 ตัวแปรที่คุมผลลัพธ์มากที่สุด: Prompt, Seed, Sampler และ VAE</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>เส้นทางของภาพหนึ่งใบ</h2>
+    <p class="sub">แตะแต่ละขั้นเพื่อดูว่ามันทำอะไร</p>
+    <div class="pipe" id="pipe">
+      <div class="node" data-k="prompt"><div class="n">01</div><div class="t">Prompt</div><div class="d">ข้อความของเรา</div></div>
+      <div class="node" data-k="encoder"><div class="n">02</div><div class="t">Text encoder</div><div class="d">แปลงเป็นความหมาย</div></div>
+      <div class="node" data-k="seed"><div class="n">03</div><div class="t">Seed</div><div class="d">สุ่ม noise ตั้งต้น</div></div>
+      <div class="node on" data-k="sampler"><div class="n">04</div><div class="t">Sampler</div><div class="d">ขัด noise ทีละ step</div></div>
+      <div class="node" data-k="vae"><div class="n">05</div><div class="t">VAE decode</div><div class="d">latent → พิกเซล</div></div>
+      <div class="node" data-k="image"><div class="n">06</div><div class="t">ภาพ</div><div class="d">ผลลัพธ์สุดท้าย</div></div>
+    </div>
+    <div class="explain" id="explain"></div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>ห้องทดลอง</h2>
+    <p class="sub">ภาพในนี้เป็นการจำลองกลไกแบบง่าย เพื่อให้เห็นว่าแต่ละค่าเปลี่ยนอะไร</p>
+    <div class="lab">
+      <div class="stage">
+        <div class="canvasbox" id="cbox">
+          <canvas id="cv" width="512" height="512" aria-label="ภาพจำลองผลลัพธ์"></canvas>
+          <div class="hud"><span id="hudL">decoded</span><span id="hudR">step 8/8</span></div>
+        </div>
+        <div class="bar"><i id="prog"></i></div>
+        <div class="filmlbl"><span>ฟิล์มสตริป · แตะเพื่อดูแต่ละ step</span><span id="filmc"></span></div>
+        <div class="film" id="film"></div>
+      </div>
+
+      <div class="ctrl">
+        <div class="grp">
+          <div class="lbl"><b>Prompt</b><small id="prv">sunset beach</small></div>
+          <div class="seg" id="pr"><button data-v="0" class="on">ชายหาดเย็น</button><button data-v="1">ป่าสน</button><button data-v="2">พอร์ตเทรต</button></div>
+          <div class="hint">เปลี่ยนปลายทางของภาพ แต่ noise ตั้งต้นยังเหมือนเดิม</div>
+        </div>
+        <div class="grp">
+          <div class="lbl"><b>Seed</b><small id="seedv">42</small></div>
+          <div class="inline"><input type="range" min="1" max="999" step="1" value="42" id="seed"><button class="btn" id="rnd" style="padding:8px 12px">สุ่ม</button></div>
+          <div class="hint">seed ใหม่ = composition ใหม่ (ตำแหน่งพระอาทิตย์ ต้นไม้ ท่าคน)</div>
+        </div>
+        <div class="grp">
+          <div class="lbl"><b>Sampler</b><small id="smv">Euler</small></div>
+          <div class="seg" id="sm"><button data-v="0" class="on">Euler</button><button data-v="1">DPM++ 2M</button><button data-v="2">Euler a</button></div>
+          <div class="hint" id="smh"></div>
+        </div>
+        <div class="grp">
+          <div class="lbl"><b>Steps</b><small id="stepsv">8</small></div>
+          <input type="range" min="2" max="30" step="1" value="8" id="steps">
+          <div class="hint">โมเดลสาย Turbo ถูกกลั่นมาให้จบใน 4–8 steps</div>
+        </div>
+        <div class="grp">
+          <div class="lbl"><b>VAE</b><small id="vav">decode</small></div>
+          <div class="seg" id="va"><button data-v="1" class="on">Decode เป็นภาพ</button><button data-v="0">ดู latent ดิบ</button></div>
+        </div>
+        <div class="grp" style="display:flex;gap:8px">
+          <button class="btn primary" id="play" style="flex:1">▶ เล่นการ denoise</button>
+          <button class="btn" id="cmp" style="flex:1">เทียบ 4 seeds</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>สรุปสำหรับงานจริง</h2>
+    <p class="sub">ใช้คุมซีรีส์ portrait ให้นิ่งและควบคุมได้</p>
+    <div class="cards">
+      <div class="card"><div class="k k1">01 · Prompt</div><h3>เข็มทิศของภาพ</h3><p>ถูกแปลงเป็นเวกเตอร์ความหมาย แล้วนำทางทุก step ของการ denoise</p><ul><li>คำที่อยู่ต้น prompt มักมีน้ำหนักมากกว่า</li><li>สาย Krea2 ชอบโครงแบบ object-first ชัดเจน</li></ul></div>
+      <div class="card"><div class="k k2">02 · Seed</div><h3>ล็อกองค์ประกอบ</h3><p>seed เดิม + ค่าเดิมทุกอย่าง = ภาพเดิมเป๊ะ</p><ul><li>เจอ composition ที่ชอบ จด seed ไว้</li><li>แก้ prompt ทีละนิดบน seed เดิม เพื่อปรับรายละเอียด</li></ul></div>
+      <div class="card"><div class="k k3">03 · Sampler</div><h3>วิธีเดินทาง</h3><p>กำหนดว่าจะเดินจาก noise ไปหาภาพอย่างไรในแต่ละ step</p><ul><li><code>Euler</code> นิ่ง คาดเดาได้</li><li><code>DPM++ 2M</code> เข้าเป้าเร็วใน step น้อย</li><li><code>Euler a</code> ฉีด noise ใหม่ทุก step ภาพเปลี่ยนตาม steps ไม่เหมาะงานซีรีส์</li></ul></div>
+      <div class="card"><div class="k k4">04 · VAE</div><h3>ล่ามสุดท้าย</h3><p>โมเดลคิดใน latent เล็ก ๆ (ราว 1/8 ของภาพ) แล้ว VAE ขยายเป็นพิกเซลจริง</p><ul><li>มีผลกับสี ความคมของผิวและเนื้อผ้า</li><li>VAE ไม่ตรงรุ่นโมเดล = ภาพซีด/สีเพี้ยน</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<footer><div class="wrap">Diffusion Lab · แผนภาพเพื่อการเรียนรู้ ภาพทั้งหมดสร้างแบบจำลองด้วยโค้ด ไม่ใช่ผลจากโมเดลจริง</div></footer>
+
+<script>
+const EX={
+prompt:'<b>Prompt</b> คือคำอธิบายภาพที่เราพิมพ์ ยังไม่มีผลอะไรจนกว่าจะถูกแปลงในขั้นถัดไป',
+encoder:'<b>Text encoder</b> แปลง prompt เป็นชุดตัวเลขที่แทนความหมาย แล้วส่งให้ sampler ใช้เป็น "เข็มทิศ" ในทุก step ว่าควรขัดภาพไปทางไหน',
+seed:'<b>Seed</b> คือเลขที่ใช้สุ่ม noise เริ่มต้น noise นี้กำหนด composition คร่าว ๆ ของภาพ seed เดิมจึงให้ภาพเดิมเสมอถ้าค่าอื่นเหมือนเดิม',
+sampler:'<b>Sampler</b> คืออัลกอริทึมที่เดินจาก noise ไปสู่ภาพทีละ step แต่ละ step โมเดลทำนายว่า noise อยู่ตรงไหนแล้วลบออก จำนวน steps และชนิด sampler จึงกำหนดทั้งความเร็วและความนิ่งของผล',
+vae:'<b>VAE</b> ทุกอย่างก่อนหน้านี้เกิดใน latent ขนาดเล็ก VAE decoder จะขยาย latent ให้เป็นภาพความละเอียดเต็มพร้อมเติมรายละเอียดผิว ผ้า และสี',
+image:'<b>ภาพ</b> ผลลัพธ์สุดท้าย ถ้าอยากได้ภาพเดิมซ้ำ ต้องใช้ prompt + seed + sampler + steps + VAE ชุดเดิมทั้งหมด'};
+const SMH=['เดินเส้นตรง นิ่ง ผลคาดเดาได้','เข้าเป้าเร็วกว่าใน steps เท่ากัน','ฉีด noise ใหม่ทุก step ภาพเปลี่ยนตามจำนวน steps'];
+const PRN=['sunset beach','pine forest','studio portrait'];
+const S={p:0,seed:42,sm:0,steps:8,cur:8,vae:1};
+
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function params(seed,extra){const r=rng(seed*7919+extra*104729+13);return{a:r(),b:r(),c:r(),d:r()}}
+const cl=v=>v<0?0:v>1?1:v;
+const mix=(a,b,t)=>a+(b-a)*t;
+function sm3(e0,e1,x){const t=cl((x-e0)/(e1-e0));return t*t*(3-2*t)}
+
+function target(p,x,y,q){
+ if(p===0){
+  const hz=.56+q.c*.08, sx=.18+q.a*.64, sy=.18+q.b*.24;
+  if(y<hz){
+   const t=y/hz;
+   let r=mix(.28,.98,t),g=mix(.16,.52,t*t),b=mix(.42,.38,t);
+   const d=Math.hypot(x-sx,(y-sy)*1.05);
+   const glow=Math.exp(-d*d*28)*.55;
+   r+=glow;g+=glow*.7;b+=glow*.3;
+   const disc=1-sm3(.072,.082,d);
+   r=mix(r,1,disc);g=mix(g,.9,disc);b=mix(b,.68,disc);
+   const cloud=Math.sin(x*9+q.d*6)*Math.sin(y*22+q.a*3);
+   if(cloud>.82&&y<hz-.05){r=mix(r,.98,.25);g=mix(g,.6,.25);b=mix(b,.55,.25)}
+   return[r,g,b];
+  }
+  const sand=.82+Math.sin(x*3+q.c*4)*.03;
+  if(y>sand){const s=.04*Math.sin(x*140+y*60);return[.86+s,.72+s,.54+s]}
+  const dd=(y-hz)/(sand-hz);
+  let r=mix(.30,.08,dd),g=mix(.20,.18,dd),b=mix(.40,.36,dd);
+  const w=Math.abs(x-sx)<(.04+dd*.12)*(.7+.3*Math.sin(y*160));
+  const ripple=.5+.5*Math.sin(y*220+x*6);
+  if(w){const k=(1-dd)*.9*ripple;r=mix(r,1,k);g=mix(g,.72,k);b=mix(b,.45,k)}
+  const foam=Math.abs(y-(sand-.012-.008*Math.sin(x*18)))<.006;
+  if(foam){r=g=b=.92}
+  return[r,g,b];
+ }
+ if(p===1){
+  let r=mix(.86,.62,y),g=mix(.90,.74,y),b=mix(.86,.66,y);
+  const mist=Math.exp(-Math.pow((y-.55)*6,2))*.15; r+=mist;g+=mist;b+=mist;
+  if(y>.76){const s=.03*Math.sin(x*80+y*40);return[.20+s,.30+s,.15]}
+  for(let L=0;L<3;L++){
+   const n=4+L*2, depth=L/2;
+   for(let i=0;i<n;i++){
+    const tx=((i/n)+q.a*.37*(L+1)+L*.13)%1, th=.28+((q.b*7+i*.31+L*.2)%1)*.22+L*.08, base=.78+L*.02, ty=base-th;
+    if(y>ty&&y<base&&Math.abs(x-tx)<(y-ty)*(.28-L*.03)){
+     const tone=mix(.55,.12,depth);
+     return[tone*.55,tone*.85+.05,tone*.65];
+    }
+   }
+  }
+  return[r,g,b];
+ }
+ const hx=.38+q.a*.24, hy=.34+q.b*.08;
+ let r=mix(.30,.20,y)+Math.exp(-Math.pow((x-.3)*3,2))*.18, g=mix(.26,.17,y)+Math.exp(-Math.pow((x-.3)*3,2))*.14, b=mix(.24,.16,y)+.04;
+ const key=cl(1-(x-hx+.12)*2.2);
+ const dh=Math.hypot((x-hx)*1.18,(y-hy)*.95);
+ if(dh<.135){
+  const rim=sm3(.12,.135,dh)*.2;
+  const sh=.35+.65*key;
+  let rr=.88*sh+rim,gg=.68*sh+rim*.8,bb=.56*sh+rim*.6;
+  const hair=y<hy-.03+Math.sin(x*30)*.01||(Math.abs(x-hx)>.09&&y<hy+.08);
+  if(hair){rr=.16+key*.1;gg=.11+key*.07;bb=.08+key*.05}
+  return[rr,gg,bb];
+ }
+ if(y>hy+.12&&y<hy+.2&&Math.abs(x-hx)<.042){const sh=.35+.55*key;return[.78*sh,.58*sh,.48*sh]}
+ const sw=.30*Math.min(1,(y-hy-.17)*3.5+.25);
+ if(y>hy+.19&&Math.abs(x-hx)<sw){
+  const sh=.3+.7*cl(1-(x-hx+.2)*1.6);
+  const fold=.06*Math.sin((x-hx)*40+y*12);
+  const cr=.62+q.c*.3, cg=.14+q.d*.1, cb=.22+q.d*.25;
+  return[cr*sh+fold,cg*sh+fold,cb*sh+fold];
+ }
+ return[r,g,b];
+}
+const curve=(t,sm)=>sm===1?1-Math.pow(1-t,2.6):t;
+
+const L=32;
+function computeNoise(seed,cur,steps){
+ const nr=rng(seed);const N=new Float32Array(L*L*3);for(let i=0;i<N.length;i++)N[i]=(nr()+nr()+nr())/1.5-1;
+ const fr=rng(seed*31+cur*17+steps*7);const F=new Float32Array(L*L*3);for(let i=0;i<F.length;i++)F[i]=fr()*2-1;
+ return{N,F};
+}
+function drawTo(canvas,st,cur){
+ const ctx=canvas.getContext('2d');
+ const {p,seed,sm,steps,vae}=st;
+ const q=params(seed,sm===2?steps:0);
+ const {N,F}=computeNoise(seed,cur,steps);
+ const t=steps?cur/steps:1,a=curve(t,sm),ex=sm===2?(1-a)*a*1.6:0;
+ const R=vae?Math.min(canvas.width,256):L;
+ const img=ctx.createImageData(R,R),D=img.data;
+ if(!vae){
+  for(let j=0;j<L;j++)for(let i=0;i<L;i++){
+   const tv=target(p,(i+.5)/L,(j+.5)/L,q),k=(j*L+i)*3;
+   const v=[0,1,2].map(c=>cl(a*tv[c]+(1-a)*(.5+N[k+c]*.6)+ex*F[k+c]*.5));
+   const o=(j*L+i)*4;
+   D[o]=cl((v[0]+v[1])*.35+.08)*255;D[o+1]=cl(v[2]*.65+v[1]*.3)*255;D[o+2]=cl(.38+(v[0]-v[2])*.85)*255;D[o+3]=255;
+  }
+ }else{
+  for(let y=0;y<R;y++)for(let x=0;x<R;x++){
+   const u=x/R,v=y/R,tv=target(p,u,v,q);
+   const fx=u*L-.5,fy=v*L-.5,i0=Math.max(0,Math.min(L-1,Math.floor(fx))),j0=Math.max(0,Math.min(L-1,Math.floor(fy)));
+   const i1=Math.min(L-1,i0+1),j1=Math.min(L-1,j0+1),tx=cl(fx-i0),ty=cl(fy-j0);
+   const o=(y*R+x)*4;
+   for(let c=0;c<3;c++){
+    const bl=(A)=>mix(mix(A[(j0*L+i0)*3+c],A[(j0*L+i1)*3+c],tx),mix(A[(j1*L+i0)*3+c],A[(j1*L+i1)*3+c],tx),ty);
+    const n=(1-a)>.02?mix(N[(j0*L+i0)*3+c],bl(N),.5):0;
+    D[o+c]=cl(a*tv[c]+(1-a)*(.5+n*.6)+ex*bl(F)*.5)*255;
+   }
+   D[o+3]=255;
+  }
+ }
+ const off=document.createElement('canvas');off.width=R;off.height=R;off.getContext('2d').putImageData(img,0,0);
+ ctx.imageSmoothingEnabled=!!vae;ctx.imageSmoothingQuality='high';
+ ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(off,0,0,canvas.width,canvas.height);
+}
+
+const cv=document.getElementById('cv'),cbox=document.getElementById('cbox'),film=document.getElementById('film');
+let cmpMode=false;
+function renderMain(){
+ cmpMode=false;
+ drawTo(cv,S,S.cur);
+ cbox.classList.toggle('pix',!S.vae);
+ document.getElementById('hudL').textContent=S.vae?'VAE decoded':'latent 32×32 · false color';
+ document.getElementById('hudR').textContent='step '+S.cur+'/'+S.steps+' · seed '+S.seed;
+ document.getElementById('prog').style.width=(S.cur/S.steps*100)+'%';
+ [...film.children].forEach(c=>c.classList.toggle('on',+c.dataset.s===S.cur));
+}
+function buildFilm(){
+ film.innerHTML='';
+ const n=S.steps,idx=[];
+ if(n<=12){for(let i=0;i<=n;i++)idx.push(i)}else{for(let i=0;i<=11;i++)idx.push(Math.round(i*n/11))}
+ idx.forEach(s=>{const c=document.createElement('canvas');c.width=96;c.height=96;c.dataset.s=s;c.title='step '+s;drawTo(c,S,s);c.onclick=()=>{S.cur=s;renderMain()};film.appendChild(c)});
+ document.getElementById('filmc').textContent=idx.length+' เฟรม';
+}
+function all(){buildFilm();renderMain()}
+
+function seg(id,key,after){document.querySelectorAll('#'+id+' button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#'+id+' button').forEach(x=>x.classList.remove('on'));b.classList.add('on');S[key]=+b.dataset.v;after&&after();all()})}
+seg('pr','p',()=>document.getElementById('prv').textContent=PRN[S.p]);
+seg('sm','sm',()=>{document.getElementById('smv').textContent=['Euler','DPM++ 2M','Euler a'][S.sm];document.getElementById('smh').textContent=SMH[S.sm]});
+seg('va','vae',()=>document.getElementById('vav').textContent=S.vae?'decode':'latent');
+document.getElementById('smh').textContent=SMH[0];
+
+const seedEl=document.getElementById('seed'),stEl=document.getElementById('steps');
+seedEl.oninput=()=>{S.seed=+seedEl.value;document.getElementById('seedv').textContent=S.seed;all()};
+document.getElementById('rnd').onclick=()=>{seedEl.value=1+Math.floor(Math.random()*999);seedEl.oninput()};
+stEl.oninput=()=>{S.steps=+stEl.value;S.cur=S.steps;document.getElementById('stepsv').textContent=S.steps;all()};
+
+let timer=null;const playBtn=document.getElementById('play');
+playBtn.onclick=()=>{
+ if(timer){clearInterval(timer);timer=null;playBtn.textContent='▶ เล่นการ denoise';return}
+ S.cur=0;renderMain();playBtn.textContent='■ หยุด';
+ timer=setInterval(()=>{if(S.cur>=S.steps){clearInterval(timer);timer=null;playBtn.textContent='▶ เล่นการ denoise';return}S.cur++;renderMain()},Math.max(90,2000/S.steps));
+};
+document.getElementById('cmp').onclick=()=>{
+ if(cmpMode){renderMain();return}
+ cmpMode=true;const ctx=cv.getContext('2d');ctx.fillStyle='#000';ctx.fillRect(0,0,512,512);
+ const tmp=document.createElement('canvas');tmp.width=252;tmp.height=252;
+ [0,1,2,3].forEach(i=>{const s=((S.seed+i*137-1)%999)+1;drawTo(tmp,{...S,seed:s},S.steps);ctx.drawImage(tmp,(i%2)*258+1,Math.floor(i/2)*258+1);
+  ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect((i%2)*258+8,Math.floor(i/2)*258+8,92,22);ctx.fillStyle='#f3d3a0';ctx.font='12px JetBrains Mono, monospace';ctx.fillText('seed '+s,(i%2)*258+14,Math.floor(i/2)*258+23)});
+ document.getElementById('hudL').textContent='prompt เดียวกัน · 4 seeds';document.getElementById('hudR').textContent='แตะอีกครั้งเพื่อกลับ';
+};
+
+function setK(k){document.querySelectorAll('#pipe .node').forEach(n=>n.classList.toggle('on',n.dataset.k===k));document.getElementById('explain').innerHTML=EX[k]}
+document.querySelectorAll('#pipe .node').forEach(n=>n.onclick=()=>setK(n.dataset.k));
+setK('sampler');all();
+</script>
+</body>
+</html>
